@@ -1,0 +1,189 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+import argparse
+import json
+import shlex
+import subprocess
+import math
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.ticker import MultipleLocator
+from scipy import signal
+
+
+FFPROBE_BINARY = 'ffprobe'
+FFMPEG_BINARY = 'ffmpeg'
+
+
+FFPROBE_CMDLINE = '{ffprobe} {file} -print_format json -show_format -show_streams -loglevel error'
+FFMPEG_AUDIO_INPUT = '{ffmpeg} -i {file} {trim} -ac 1 -f s16le -vn -loglevel error -'
+
+
+def build_shell_command(cmd, replacements):
+	"""
+	Replace {variable} with dictionary of replacements
+	"""
+
+	# Split to tokens
+	params = shlex.split(cmd)
+
+	# Build lookup table for replacements
+	replacements = {'{'+key+'}': val for key, val in replacements.items()}
+
+	new_params = []
+	for param in params:
+		# Find replacement
+		replacement = replacements.get(param, param)
+		# None value removes replacement
+		if replacement is None:
+			continue
+		elif isinstance(replacement, list):
+			# List is added to arguments
+			new_params += replacement
+		else:
+			# Single value replaces placeholder
+			new_params.append(replacement)
+	return new_params
+
+
+def get_media_info(file):
+	"""
+	Read media info using ffprobe utility
+	"""
+	cmd = build_shell_command(FFPROBE_CMDLINE, {'ffprobe': FFPROBE_BINARY, 'file': file})
+	return json.loads(subprocess.check_output(cmd))
+
+
+def get_audio_info(media_info):
+	"""
+	Finds first audio stream
+	"""
+	for stream in media_info['streams']:
+		if stream['codec_type'] == 'audio':
+			return stream
+
+
+def read_audio(args, audio_info):
+	"""
+	Returns audio sample rate and samples
+	"""
+	cmd_args = {'ffmpeg': FFMPEG_BINARY, 'file': args.file, 'trim': None}
+	if args.start is not None or args.length is not None:
+		cmd_args['trim'] = []
+		if args.start is not None:
+			cmd_args['trim'] += ['-ss', str(args.start)]
+		if args.length is not None:
+			cmd_args['trim'] += ['-to', str((args.start or 0) + args.length)]
+	cmd = build_shell_command(FFMPEG_AUDIO_INPUT, cmd_args)
+	stream = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+	data = stream.stdout.read()
+	data = np.frombuffer(data, dtype=np.int16).astype(float)
+	sample_rate = int(audio_info['sample_rate'])
+
+	data /= (2**15)
+	return {
+		'sample_rate': sample_rate,
+		'samples': data,
+	}
+
+
+def analyze_audio(args, audio_data, step_size=512, max_slices=None):
+	frequency = np.array([], dtype=np.float64)
+	fft = None
+	if max_slices is None:
+		step_size_log = math.log2(step_size)
+		max_usable_window_log = math.log2(8192)
+		max_slices = round(max_usable_window_log - step_size_log)
+		if max_slices < 1:
+			max_slices = 1
+
+	for slice_number in range(0, max_slices + 1):
+		slice_frequency, time, slice_fft = signal.stft(
+			audio_data['samples'],
+			audio_data['sample_rate'],
+			window=args.window,
+			nperseg=step_size * (2 ** slice_number),
+			noverlap=step_size * (2 ** slice_number) - step_size
+		)
+
+		if fft is None:
+			fft = np.array([], dtype=np.float64).reshape(0, len(time))
+
+		start = 1 if slice_number == max_slices else step_size // 4
+
+		frequency = np.append(slice_frequency[start:step_size // 2], frequency)
+		fft = np.append(slice_fft[start:step_size // 2,:], fft, axis=0)
+
+	#frequency, time, fft = signal.stft(
+	#	audio_data['samples'],
+	#	audio_data['sample_rate'],
+	#	window=args.window,
+	#	nperseg=8192,
+	#	noverlap=8192-512
+	#)
+
+	fft = np.abs(fft)
+	fft[fft == 0] = 0.0000000000001 # prevent zero division
+	fft = 20.*np.log10(fft)
+
+	return frequency, time, fft
+
+
+
+def main():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('file', help="Multimedia file")
+	parser.add_argument('output', help="Output image")
+	parser.add_argument('--start', type=float, help="Start second")
+	parser.add_argument('--length', type=float, help="Length of audio")
+	parser.add_argument('--window', type=str, default='blackmanharris', help="Window function")
+	parser.add_argument('--colormap', type=str, default='inferno', help="Color map")
+	parser.add_argument('--grid', action='store_true', help="Generate grid")
+	parser.add_argument('--scale', action='store_true', help="Generate scale")
+	parser.add_argument('--colorbar', action='store_true', help="Generate collor bar")
+	parser.add_argument('--linear', action='store_true', help="Linear y scale")
+	parser.add_argument('--image_width', type=int, help="Generated image width")
+	parser.add_argument('--image_height', type=int, help="Generated image height", default=800)
+	parser.add_argument('--gain_min', type=int, help="Minimal gain", default=-100)
+	parser.add_argument('--gain_max', type=int, help="Maximal gain", default=-30)
+	parser.add_argument('--frequency_min', type=int, help="Minimal frequency", default=80)
+	parser.add_argument('--frequency_max', type=int, help="Maximal frequency", default=8000)
+	parser.add_argument('--step_size', type=int, help="Number of samples per step", default=512)
+	args = parser.parse_args()
+	audio_info = get_audio_info(get_media_info(args.file))
+	audio_data = read_audio(args, audio_info)
+	frequency, time, fft = analyze_audio(args, audio_data, step_size=args.step_size)
+
+	px = 1/plt.rcParams['figure.dpi']
+
+	image_size = (fft.shape[1] + (100 if args.scale else 0) + (100 if args.colorbar else 0) if args.image_width is None else args.image_width, args.image_height)
+
+	fig = plt.figure(figsize=(image_size[0]*px, image_size[1]*px))
+
+	ax = fig.add_subplot()
+	im = ax.pcolormesh(time, frequency, fft, vmax=args.gain_max, vmin=args.gain_min, cmap=args.colormap, shading='gouraud')
+	fig.colorbar(im, orientation='vertical', pad=0, fraction=100/image_size[0])
+	ax.set_ylim(args.frequency_min, args.frequency_max)
+	ax.xaxis.set_major_locator(MultipleLocator(base=1.0))
+	if not args.linear:
+		ax.set_yscale('log')
+	ax.set_ylabel('Frequency [Hz]')
+	ax.set_xlabel('Time [sec]')
+	ax.spines['top'].set_visible(False)
+	ax.spines['right'].set_visible(False)
+	ax.spines['bottom'].set_visible(False)
+	ax.spines['left'].set_visible(False)
+	if args.grid:
+		ax.grid(color='#ffffff', axis='y', which='major', alpha=0.5)
+		ax.grid(linestyle='dotted', color='#ffffff', axis='y', which='minor', alpha=0.3)
+	if args.scale:
+		fig.subplots_adjust(left=100/image_size[0], right=1, top=1, bottom=60/image_size[1])
+	else:
+		fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+	fig.savefig(args.output)
+
+
+if __name__ == "__main__":
+	main()
