@@ -163,7 +163,8 @@ def main():
 
 	ax = fig.add_subplot()
 	im = ax.pcolormesh(time, frequency, fft, vmax=args.gain_max, vmin=args.gain_min, cmap=args.colormap, shading='gouraud')
-	fig.colorbar(im, orientation='vertical', pad=0, fraction=100/image_size[0])
+	if args.colorbar:
+		fig.colorbar(im, orientation='vertical', pad=0, fraction=100/image_size[0])
 	ax.set_ylim(args.frequency_min, args.frequency_max)
 	ax.xaxis.set_major_locator(MultipleLocator(base=1.0))
 	if not args.linear:
