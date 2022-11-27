@@ -17,7 +17,7 @@ FFMPEG_BINARY = 'ffmpeg'
 
 
 FFPROBE_CMDLINE = '{ffprobe} {file} -print_format json -show_format -show_streams -loglevel error'
-FFMPEG_AUDIO_INPUT = '{ffmpeg} -i {file} {trim} -ac 1 -f s16le -vn -loglevel error -'
+FFMPEG_CMDLINE = '{ffmpeg} -i {file} {trim} -ac 1 -f s16le -vn -loglevel error -'
 
 
 def build_shell_command(cmd, replacements):
@@ -75,7 +75,7 @@ def read_audio(args, audio_info):
 			cmd_args['trim'] += ['-ss', str(args.start)]
 		if args.length is not None:
 			cmd_args['trim'] += ['-to', str((args.start or 0) + args.length)]
-	cmd = build_shell_command(FFMPEG_AUDIO_INPUT, cmd_args)
+	cmd = build_shell_command(FFMPEG_CMDLINE, cmd_args)
 	stream = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 	data = stream.stdout.read()
 	data = np.frombuffer(data, dtype=np.int16).astype(float)
