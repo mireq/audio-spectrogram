@@ -10,6 +10,30 @@ Requirements
 - ffmpeg binary
 - ffprobe binary
 
+Usage
+-----
+
+Run ``./spectrogram input_audio_file out.png``.
+
+Optional arguments
+------------------
+
+--start               Start second
+--length              Length of audio
+--window              Window function
+--colormap            Color map (from matplotlib)
+--grid                Generate grid
+--scale               Generate scale
+--colorbar            Generate collor bar
+--linear              Linear y scale
+--image_width         Generated image width
+--image_height        Generated image height
+--gain_min            Minimal gain (default -100dB)
+--gain_max            Maximal gain (default -30dB)
+--frequency_min       Minimal frequency
+--frequency_max       Maximal frequency
+--step_size           Number of samples per step
+
 Examples
 --------
 
