@@ -7,6 +7,7 @@ Requirements
 
 - numpy
 - scipy
+- matplotlib
 - ffmpeg binary
 - ffprobe binary
 
