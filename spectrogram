@@ -115,14 +115,6 @@ def analyze_audio(args, audio_data, step_size=512, max_slices=None):
 		frequency = np.append(slice_frequency[start:step_size // 2], frequency)
 		fft = np.append(slice_fft[start:step_size // 2,:], fft, axis=0)
 
-	#frequency, time, fft = signal.stft(
-	#	audio_data['samples'],
-	#	audio_data['sample_rate'],
-	#	window=args.window,
-	#	nperseg=8192,
-	#	noverlap=8192-512
-	#)
-
 	fft = np.abs(fft)
 	fft[fft == 0] = 0.0000000000001 # prevent zero division
 	fft = 20.*np.log10(fft)
